@@ -1,3 +1,4 @@
 node_modules/
 dist/
 fans_state_*.json
+.npmrc
