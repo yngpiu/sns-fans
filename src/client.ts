@@ -18,15 +18,32 @@ import type {
   TokenConfig,
 } from "./types.js"
 
-// ----- Internal types -----
+// ----- Public API types -----
 
-interface WatcherConfig {
+export interface FansClientConfig extends TokenConfig {
+  /**
+   * File used to persist seen notification IDs across restarts.
+   * Defaults to `./fans_state.json`; set to `false` to disable persistence.
+   */
+  stateFile?: string | false
+}
+
+export interface WatchConfig {
+  /**
+   * Stable identifier for this watcher in the persisted state file.
+   * If omitted, a deterministic key is derived from the watcher filters.
+   */
+  id?: string
   groupCodes?: GroupIdentifier | GroupIdentifier[]
   categories?: NotificationCategory[]
   fetchPostDetail?: boolean
+  interval?: number
 }
 
+// ----- Internal types -----
+
 interface InternalWatcher {
+  stateKey: string
   groupIds: string[]
   categories: string[]
   fetchPostDetail: boolean
@@ -37,8 +54,6 @@ interface InternalWatcher {
 interface PersistedState {
   watchers: Record<string, { seenIds: string[] }>
 }
-
-// ----- Public API types -----
 
 /**
  * Handle returned by {@link FansClient.watch}.
@@ -83,27 +98,28 @@ export interface WatcherHandle {
  *
  * const w = client.watch({ groupCodes: ["nmixx", "twice"] })
  * w.onNotification((n) => console.log(n.message))
- * client.start({ interval: 60 })
  * ```
  */
 export class FansClient {
   private auth: TokenManager
-  private stateFile: string
+  private stateFile: string | null
   private watchers = new Map<string, InternalWatcher>()
   private nextWatcherId = 0
 
   /**
-   * Khởi tạo client để kết nối app.fans API.
-   * Cần token + clientUuid + guid lấy từ localStorage của trình duyệt.
+   * Create a client for the app.fans API.
    *
-   * @param config.token - JWT token từ localStorage key `j-access-token`
-   * @param config.clientUuid - Client UUID từ `mmkv.default\j-client-uuid`, thêm prefix `"web-"`
-   * @param config.guid - GUID từ localStorage key `GUID`
-   * @param config.stateFile - Đường dẫn file lưu trạng thái đã xem (mặc định: `./fans_state.json`)
+   * @param config.token - JWT token from localStorage key `j-access-token`
+   * @param config.clientUuid - Client UUID from `mmkv.default\j-client-uuid`, prefixed with `"web-"`
+   * @param config.guid - GUID from localStorage key `GUID`
+   * @param config.stateFile - State file path, or `false` to disable persistence.
    */
-  constructor(config: TokenConfig & { stateFile?: string }) {
+  constructor(config: FansClientConfig) {
     this.auth = new TokenManager(config)
-    this.stateFile = config.stateFile || path.resolve(process.cwd(), "fans_state.json")
+    this.stateFile =
+      config.stateFile === false
+        ? null
+        : config.stateFile || path.resolve(process.cwd(), "fans_state.json")
   }
 
   // ----- Auth -----
@@ -167,6 +183,12 @@ export class FansClient {
     )
   }
 
+  private normalizeGroupIdentifiers(
+    groupCodes?: GroupIdentifier | GroupIdentifier[],
+  ): GroupIdentifier[] {
+    return Array.isArray(groupCodes) ? groupCodes : groupCodes ? [groupCodes] : []
+  }
+
   // ----- Notifications -----
 
   /**
@@ -185,8 +207,9 @@ export class FansClient {
       classification_Overlap: ["COMMUNITY"],
     }
 
-    if (filter?.groupCodes?.length) {
-      const ids = filter.groupCodes.map((code) => {
+    const codes = this.normalizeGroupIdentifiers(filter?.groupCodes)
+    if (codes.length) {
+      const ids = codes.map((code) => {
         const normalized = this.validateGroupCode(code)
         return GROUPS[normalized].id
       })
@@ -316,6 +339,7 @@ export class FansClient {
    *
    * Polling starts automatically and stops when the last watcher is removed.
    *
+   * @param config.id - Stable key for persisted seen IDs. Derived from filters when omitted.
    * @param config.groupCodes - One or more group codes to watch (empty = all groups)
    * @param config.categories - Only watch these notification categories (empty = all categories)
    * @param config.fetchPostDetail - If true, automatically fetch full post detail for artist posts
@@ -323,27 +347,29 @@ export class FansClient {
    *
    * @returns A handle to attach handlers or remove the watcher
    */
-  watch(config: WatcherConfig & { interval?: number }): WatcherHandle {
+  watch(config: WatchConfig): WatcherHandle {
     const name = `watcher-${++this.nextWatcherId}`
 
     if (config.interval) {
       this.pollingInterval = config.interval
     }
 
-    const rawCodes = config.groupCodes
-    const codes = Array.isArray(rawCodes) ? rawCodes : rawCodes ? [rawCodes] : []
+    const codes = this.normalizeGroupIdentifiers(config.groupCodes)
     const groupIds = codes.map((code) => {
       const normalized = this.validateGroupCode(code)
       return GROUPS[normalized].id
     })
 
+    const categories = config.categories ?? []
+    const stateKey = config.id ?? this.buildWatcherStateKey(groupIds, categories)
     const persisted = this.loadPersistedState()
 
     this.watchers.set(name, {
+      stateKey,
       groupIds,
-      categories: config.categories ?? [],
+      categories,
       fetchPostDetail: config.fetchPostDetail ?? false,
-      seenIds: persisted.watchers[name]?.seenIds ?? [],
+      seenIds: persisted.watchers[stateKey]?.seenIds ?? persisted.watchers[name]?.seenIds ?? [],
       handlers: new Set(),
     })
 
@@ -391,6 +417,8 @@ export class FansClient {
   }
 
   private loadPersistedState(): PersistedState {
+    if (!this.stateFile) return { watchers: {} }
+
     try {
       if (fs.existsSync(this.stateFile)) {
         const raw = fs.readFileSync(this.stateFile, "utf-8")
@@ -403,15 +431,23 @@ export class FansClient {
   }
 
   private persistState(): void {
+    if (!this.stateFile) return
+
     const state: PersistedState = { watchers: {} }
-    for (const [name, ws] of this.watchers) {
-      state.watchers[name] = { seenIds: ws.seenIds }
+    for (const ws of this.watchers.values()) {
+      state.watchers[ws.stateKey] = { seenIds: ws.seenIds }
     }
     const dir = path.dirname(this.stateFile)
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true })
     }
     fs.writeFileSync(this.stateFile, JSON.stringify(state, null, 2), "utf-8")
+  }
+
+  private buildWatcherStateKey(groupIds: string[], categories: string[]): string {
+    const groupsPart = groupIds.length ? groupIds.slice().sort().join(",") : "all"
+    const categoriesPart = categories.length ? categories.slice().sort().join(",") : "all"
+    return `groups:${groupsPart}|categories:${categoriesPart}`
   }
 
   private async fetchNotificationsForWatchers(): Promise<Notification[]> {

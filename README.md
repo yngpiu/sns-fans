@@ -64,7 +64,7 @@ w.onNotification((notif) => {
 })
 ```
 
-Full examples can be found [here](examples/quickstart.ts).
+Full examples can be found [here](examples/quickstart.ts). The example reads credentials from `FANS_TOKEN`, `FANS_CLIENT_UUID`, and `FANS_GUID`.
 
 ---
 
@@ -108,15 +108,17 @@ const client = new FansClient({
   clientUuid: "web-xxx...",  // required
   guid: "xxx...",            // required
   stateFile: "./state.json", // optional, defaults to ./fans_state.json
+  // stateFile: false,       // disable persistence
 })
 ```
 
-`stateFile` persists seen notification IDs across restarts so old notifications are not re-delivered. Omit to skip file persistence.
+`stateFile` persists seen notification IDs across restarts so old notifications are not re-delivered. Omit it to use `./fans_state.json`, or set `stateFile: false` to disable file persistence.
 
 ## watch(config) — Create a watcher (auto-polling)
 
 ```typescript
 const w = client.watch({
+  id: "nmixx-twice-posts",           // optional stable persistence key
   groupCodes: ["nmixx", "twice"],  // groups to monitor
   categories: undefined,           // undefined = all categories
   fetchPostDetail: true,           // auto-fetch post content
@@ -128,6 +130,7 @@ const w = client.watch({
 
 | Option | Type | Default | Description |
 |---|---|---|---|
+| `id` | `string` | derived from filters | Stable key for persisted seen IDs |
 | `groupCodes` | `string \| string[]` | all groups | Group code or display name. Accepts `"nmixx"` or `"NMIXX"` |
 | `categories` | `NotificationCategory[]` | all | Filter by category, e.g. `[NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST]` |
 | `fetchPostDetail` | `boolean` | `false` | If `true`, auto-fetches post body for `POST_CREATED_BY_ARTIST` notifications |

@@ -1,4 +1,4 @@
-export type { WatcherHandle } from "./client.js"
+export type { FansClientConfig, WatchConfig, WatcherHandle } from "./client.js"
 export { FansClient } from "./client.js"
 export type { GroupCode, GroupIdentifier, GroupName, NotificationCategory } from "./constants.js"
 export { GROUPS, NOTIFICATION_CATEGORIES } from "./constants.js"

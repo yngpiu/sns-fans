@@ -2,10 +2,15 @@ import * as fs from "node:fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { FansClient } from "./client.js"
 
-const VALID_TOKEN =
-  "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiaWF0IjoxNzA0MDAwMDAwLCJleHAiOjk5OTk5OTk5OTl9.signature"
+const VALID_TOKEN = makeToken({ sub: "1", iat: 1704000000, exp: 9999999999 })
 
 let stateId = 0
+
+function makeToken(payload: Record<string, unknown>): string {
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url")
+  return `${header}.${body}.signature`
+}
 
 type PrivateClient = {
   validateGroupCode(code: string): void
@@ -110,6 +115,11 @@ describe("watch()", () => {
     const client = createClient()
     expect(() => client.watch({ groupCodes: "NMIXX", interval: 30 })).not.toThrow()
   })
+
+  it("accepts a stable watcher id for persisted state", () => {
+    const client = createClient()
+    expect(() => client.watch({ id: "nmixx-posts", groupCodes: "NMIXX" })).not.toThrow()
+  })
 })
 
 describe("watch + check cycle", () => {
@@ -175,6 +185,70 @@ describe("WatcherHandle.remove", () => {
   })
 })
 
+describe("watcher persistence", () => {
+  it("restores seen notifications by stable watcher id", async () => {
+    stateId++
+    const stateFile = `fans_state_${stateId}.json`
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ watchers: { "nmixx-posts": { seenIds: ["1"] } } }),
+      "utf-8",
+    )
+
+    const client = new FansClient({
+      token: VALID_TOKEN,
+      clientUuid: "web-test",
+      guid: "guid-test",
+      stateFile,
+    })
+    const handler = vi.fn()
+    const spy = vi.spyOn(client, "getNotifications").mockResolvedValue([
+      {
+        id: "1",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "1",
+        updatedAt: "1",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+      },
+      {
+        id: "2",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "2",
+        updatedAt: "2",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+      },
+    ])
+
+    const watcher = client.watch({ id: "nmixx-posts", groupCodes: "NMIXX", interval: 1000 })
+    watcher.onNotification(handler)
+
+    await priv(client).check()
+
+    expect(spy).toHaveBeenCalledTimes(1)
+    expect(handler).toHaveBeenCalledTimes(1)
+    expect(handler.mock.calls[0][0].id).toBe("2")
+  })
+
+  it("can disable state file persistence", async () => {
+    const client = new FansClient({
+      token: VALID_TOKEN,
+      clientUuid: "web-test",
+      guid: "guid-test",
+      stateFile: false,
+    })
+    vi.spyOn(client, "getNotifications").mockResolvedValue([])
+
+    client.watch({ groupCodes: "NMIXX", interval: 1000 })
+    await priv(client).check()
+
+    expect(
+      fs.readdirSync(".").some((file) => file.startsWith("fans_state_") && file.endsWith(".json")),
+    ).toBe(false)
+  })
+})
+
 describe("getNotifications — mocked", () => {
   it("returns empty array when API returns no notifications", async () => {
     vi.stubGlobal(
@@ -189,6 +263,22 @@ describe("getNotifications — mocked", () => {
     const client = createClient()
     const result = await client.getNotifications()
     expect(result).toEqual([])
+  })
+
+  it("accepts a single group code string", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ data: { notifications: { objects: [] } } }),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const client = createClient()
+    await client.getNotifications({ groupCodes: "NMIXX" })
+
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init.body)
+    expect(body.variables.filter.group_Overlap).toEqual(["14"])
   })
 
   it("handles 401 by retrying after refresh", async () => {

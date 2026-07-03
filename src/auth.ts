@@ -29,18 +29,25 @@ export interface DecodedToken {
   ucu?: string
 }
 
-function decodeBase64(str: string): string {
-  if (typeof atob === "function") {
-    return atob(str)
+function decodeBase64Url(str: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(str)) {
+    throw new Error("Invalid base64url input")
   }
-  return Buffer.from(str, "base64").toString("utf-8")
+
+  let normalized = str.replace(/-/g, "+").replace(/_/g, "/")
+  const padding = normalized.length % 4
+  if (padding) {
+    normalized += "=".repeat(4 - padding)
+  }
+
+  return Buffer.from(normalized, "base64").toString("utf-8")
 }
 
 function decodeJWT(token: string): DecodedToken | null {
   try {
     const parts = token.split(".")
     if (parts.length !== 3) return null
-    return JSON.parse(decodeBase64(parts[1]))
+    return JSON.parse(decodeBase64Url(parts[1]))
   } catch {
     return null
   }

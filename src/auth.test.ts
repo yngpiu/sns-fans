@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest"
 import { TokenManager } from "./auth.js"
 
 function makeToken(payload: Record<string, unknown>): string {
-  const header = btoa(JSON.stringify({ alg: "RS256", typ: "JWT" }))
-  const body = btoa(JSON.stringify(payload))
+  const header = Buffer.from(JSON.stringify({ alg: "RS256", typ: "JWT" })).toString("base64url")
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url")
   return `${header}.${body}.signature`
 }
 
@@ -29,6 +29,20 @@ describe("TokenManager", () => {
     expect(decoded).not.toBeNull()
     expect(decoded?.sub).toBe("42")
     expect(decoded?.exp).toBe(9999999999)
+  })
+
+  it("decode() supports JWT base64url payloads with URL-safe characters", () => {
+    const token = makeToken({ sub: "42", exp: 9999999999, marker: "\u008f\u008f" })
+    expect(token.split(".")[1]).toContain("_")
+
+    const decoded = new TokenManager({
+      token,
+      clientUuid: "web-1",
+      guid: "g-1",
+    }).decode()
+
+    expect(decoded).not.toBeNull()
+    expect(decoded?.sub).toBe("42")
   })
 
   it("decode() returns null for invalid JWT", () => {

@@ -2,3 +2,4 @@ node_modules/
 dist/
 fans_state_*.json
 .npmrc
+.npm-cache/

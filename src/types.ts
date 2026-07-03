@@ -164,7 +164,7 @@ import type { GroupIdentifier, NotificationCategory } from "./constants.js"
  */
 export interface NotificationFilter {
   /** Only include notifications from these groups. Accepts code (lowercase) or display name. */
-  groupCodes?: GroupIdentifier[]
+  groupCodes?: GroupIdentifier | GroupIdentifier[]
   /** Only include notifications with these category values */
   categories?: NotificationCategory[]
 }
