@@ -21,75 +21,75 @@ w.onNotification((n) => console.log(`[${n.group?.name}] ${n.message}`))
 
 ## `FansClient`
 
-Class chính. Import từ `sns-fans`.
+Main class. Import from `sns-fans`.
 
-### `constructor(config)` — Khởi tạo client
+### `constructor(config)`
 
 ```ts
 const client = new FansClient({
-  token: "eyJ...",           // bắt buộc
-  clientUuid: "web-xxx...",  // bắt buộc
-  guid: "xxx...",            // bắt buộc
-  stateFile: "./state.json", // không bắt buộc, mặc định ./fans_state.json
+  token: "eyJ...",           // required
+  clientUuid: "web-xxx...",  // required
+  guid: "xxx...",            // required
+  stateFile: "./state.json", // optional, defaults to ./fans_state.json
 })
 ```
 
-3 tham số bắt buộc lấy từ localStorage của app.fans trên trình duyệt:
+3 required parameters from app.fans browser localStorage:
 - `j-access-token` → `token`
-- `mmkv.default\j-client-uuid` → thêm `"web-"` ở đầu → `clientUuid`
+- `mmkv.default\j-client-uuid` → prepend `"web-"` → `clientUuid`
 - `GUID` → `guid`
 
-`stateFile` là file JSON client tự động lưu các ID đã xem, để lần sau không gửi lại notification cũ. Nếu không muốn dùng file thì bỏ qua.
+`stateFile` is a JSON file where the client persists seen notification IDs across restarts, so old notifications are not re-delivered. Omit to skip file persistence.
 
-### `watch(config)` — Tạo watcher + tự động polling
+### `watch(config)` — Create a watcher (auto-polling)
 
-Đây là hàm chính. Dùng khi bạn muốn chạy nền, nhận notification mới tự động.
+Primary function. Use when you want background polling for new notifications.
 
 ```ts
 const w = client.watch({
-  groupCodes: ["nmixx", "twice"],  // lọc group nào
-  categories: undefined,           // undefined = tất cả categories
-  fetchPostDetail: true,           // có fetch nội dung post không
-  interval: 60,                    // bao lâu check 1 lần (giây)
+  groupCodes: ["nmixx", "twice"],  // which groups to monitor
+  categories: undefined,           // undefined = all categories
+  fetchPostDetail: true,           // whether to fetch post content
+  interval: 60,                    // polling interval in seconds
 })
 ```
 
-Các filter:
+Filters:
 
-- **`groupCodes`** — Chỉ nhận notification của nhóm này. Nhận string (`"nmixx"`) hoặc array (`["nmixx", "twice"]`). Mặc định: tất cả groups.
-- **`categories`** — Chỉ nhận notification loại này. VD: `[NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST]`. Mặc định: tất cả.
-- **`fetchPostDetail`** — Nếu `true`, với notification loại `POST_CREATED_BY_ARTIST`, client tự động gọi `getPostDetail()` và gắn kết quả vào `Notification.postDetail`. Nếu `false`, `postDetail` là `null`.
-- **`interval`** — Số giây giữa 2 lần check API. Mặc định: 60.
+- **`groupCodes`** — Only receive notifications from these groups. Accepts a string (`"nmixx"`) or array (`["nmixx", "twice"]`). Default: all groups.
+- **`categories`** — Only receive notifications of these types. E.g. `[NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST]`. Default: all.
+- **`fetchPostDetail`** — If `true`, for `POST_CREATED_BY_ARTIST` notifications the client automatically calls `getPostDetail()` and attaches the result to `Notification.postDetail`. If `false`, `postDetail` is `null`.
+- **`interval`** — Seconds between API checks. Default: 60.
 
-Khi gọi `watch()`, polling tự động bắt đầu. Khi gọi `w.remove()`, polling tự động dừng nếu không còn watcher nào.
+Calling `watch()` starts polling automatically. Calling `w.remove()` stops polling if no other watchers remain.
 
-`watch()` trả về **`WatcherHandle`**, có 3 method:
+`watch()` returns a **`WatcherHandle`** with 3 methods:
 
-#### `w.onNotification(handler)` — Nhận notification
+#### `w.onNotification(handler)` — Receive notifications
 
 ```ts
 w.onNotification((notif) => {
-  console.log(notif.message)          // nội dung thông báo
+  console.log(notif.message)          // notification text
   console.log(notif.category)         // "POST_CREATED_BY_ARTIST", ...
   console.log(notif.group?.name)      // "NMIXX", "TWICE", ...
-  console.log(notif.createdAt)        // thời gian
-  console.log(notif.linkUrl)          // đường dẫn bài viết
+  console.log(notif.createdAt)        // timestamp
+  console.log(notif.linkUrl)          // post URL path
   if (notif.postDetail) {
-    console.log(notif.postDetail.body) // nội dung bài viết
-    console.log(notif.postDetail.attachments) // ảnh/video
+    console.log(notif.postDetail.body) // post body text
+    console.log(notif.postDetail.attachments) // images/videos
   }
 })
 ```
 
-Handler được gọi khi có notification mới (chưa từng thấy trong các lần check trước). Thứ tự: newest trước.
+Handler fires for each new notification (not seen in previous checks). Newest first.
 
-#### `w.onWebhook(url)` — Gửi webhook
+#### `w.onWebhook(url)` — Send webhook
 
 ```ts
 w.onWebhook("https://example.com/fans-notification")
 ```
 
-Mỗi khi có notification mới, client POST JSON đến URL đó. Payload mẫu:
+Each new notification triggers a POST JSON request to the URL. Sample payload:
 
 ```json
 {
@@ -103,47 +103,47 @@ Mỗi khi có notification mới, client POST JSON đến URL đó. Payload mẫ
 }
 ```
 
-#### `w.remove()` — Xoá watcher
+#### `w.remove()` — Remove watcher
 
 ```ts
 w.remove()
 ```
 
-Xoá watcher này. Nếu không còn watcher nào, polling tự động dừng.
+Removes this watcher. Polling stops automatically if no watchers remain.
 
-### `getNotifications(filter?)` — Fetch thủ công
+### `getNotifications(filter?)` — Manual fetch
 
-Dùng khi bạn không cần watcher, chỉ muốn lấy danh sách notification một lần.
+Use when you don't need a watcher, just want to fetch notifications once.
 
 ```ts
 const notifs = await client.getNotifications({
   groupCodes: ["nmixx"],
   categories: [NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST],
 })
-// notifs là Notification[], mới nhất trước
+// notifs is Notification[], newest first
 ```
 
-Cùng filter shape với `watch()`.
+Same filter shape as `watch()`.
 
-### `getPostDetail(slug)` — Fetch nội dung bài viết
+### `getPostDetail(slug)` — Fetch post content
 
-Dùng khi bạn có `Notification.linkUrl` (VD: `/post/abc-123`) và muốn đọc nội dung đầy đủ.
+Use when you have a `Notification.linkUrl` (e.g. `/post/abc-123`) and want full content.
 
 ```ts
 const slug = notif.linkUrl?.split("/").pop() // "abc-123"
 const post = await client.getPostDetail(slug)
 if (post) {
   console.log(post.body)                    // text
-  console.log(post.bodyBlocks)              // text blocks + sticker
-  console.log(post.attachments)             // ảnh/video
+  console.log(post.bodyBlocks)              // text blocks + stickers
+  console.log(post.attachments)             // images/videos
 }
 ```
 
-Mỗi attachment có `key` và `url`. Nếu `url` null thì dùng `https://img.app.fans/{key}`.
+Each attachment has `key` and `url`. If `url` is null, use `https://img.app.fans/{key}`.
 
 ## `GROUPS`
 
-Dùng để biết group code nào có sẵn.
+Use to discover available group codes.
 
 ```ts
 import { GROUPS } from "sns-fans"
@@ -151,24 +151,24 @@ GROUPS.nmixx  // { id: "14", name: "NMIXX" }
 GROUPS.twice  // { id: "9", name: "TWICE" }
 ```
 
-Có 17 groups: nmixx, twice, itzy, girlset, day6, twopm, straykids, jypark, jangwooyoung, niziu, xdinaryheroes, kickflip, nexz, parkyoonho, nichkhun, junk, dodree.
+17 groups available: nmixx, twice, itzy, girlset, day6, twopm, straykids, jypark, jangwooyoung, niziu, xdinaryheroes, kickflip, nexz, parkyoonho, nichkhun, junk, dodree.
 
 ## `NOTIFICATION_CATEGORIES`
 
-Dùng để lọc category trong `watch()` và `getNotifications()`.
+Use to filter categories in `watch()` and `getNotifications()`.
 
 ```ts
 import { NOTIFICATION_CATEGORIES } from "sns-fans"
 ```
 
-| Constant | Ý nghĩa |
+| Constant | Meaning |
 |---|---|
-| `POST_CREATED_BY_ARTIST` | Artist đăng bài viết mới |
-| `CLIP_ACTIVATED` | Clip được kích hoạt |
-| `NOTICE_ACTIVATED` | Thông báo chính thức |
-| `POST_LIKE_CREATED_BY_ARTIST` | Artist like bài viết |
-| `COMMENT_CREATED_BY_ARTIST` | Artist comment |
-| `COMMENT_LIKE_CREATED_BY_ARTIST` | Artist like comment |
+| `POST_CREATED_BY_ARTIST` | Artist posted a new post |
+| `CLIP_ACTIVATED` | Clip activated |
+| `NOTICE_ACTIVATED` | Official notice |
+| `POST_LIKE_CREATED_BY_ARTIST` | Artist liked a post |
+| `COMMENT_CREATED_BY_ARTIST` | Artist commented |
+| `COMMENT_LIKE_CREATED_BY_ARTIST` | Artist liked a comment |
 
 ## Errors
 
@@ -176,8 +176,8 @@ import { NOTIFICATION_CATEGORIES } from "sns-fans"
 import { FansAuthError, FansValidationError, FansError } from "sns-fans"
 ```
 
-- `FansAuthError` — Token hết hạn, refresh token thất bại. Cần lấy token mới từ trình duyệt.
-- `FansValidationError` — Group code sai, slug rỗng, ...
-- `FansError` — Lỗi chung (API lỗi, network lỗi, ...)
+- `FansAuthError` — Token expired or refresh failed. Obtain a new token from the browser.
+- `FansValidationError` — Invalid group code, empty slug, etc.
+- `FansError` — General errors (API error, network error, etc.)
 
 ## License MIT
