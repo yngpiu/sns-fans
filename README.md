@@ -27,17 +27,24 @@ Main class. Import from `sns-fans`.
 
 ```ts
 const client = new FansClient({
-  token: "eyJ...",           // required
-  clientUuid: "web-xxx...",  // required
-  guid: "xxx...",            // required
+  token: "eyJ...",           // required — j-access-token from localStorage
+  clientUuid: "web-xxx...",  // required — j-client-uuid from localStorage, prepend "web-"
+  guid: "xxx...",            // required — GUID from localStorage
   stateFile: "./state.json", // optional, defaults to ./fans_state.json
 })
 ```
 
 3 required parameters from app.fans browser localStorage:
-- `j-access-token` → `token`
-- `mmkv.default\j-client-uuid` → prepend `"web-"` → `clientUuid`
-- `GUID` → `guid`
+
+1. Open `https://app.fans` in Chrome, press F12 → **Application** → **Local Storage** → `https://app.fans`
+2. Copy these keys:
+   - `j-access-token` → `token`
+   - `GUID` → `guid`
+   - Look for a key containing `j-client-uuid` (e.g. `mmkv.default\j-client-uuid`, `j-client-uuid`, or similar) → copy value → **prepend `"web-"`** → `clientUuid`
+
+If you can't find `j-client-uuid`, open the **Network** tab, find any `graphql` request, look for the `x-client-uuid` request header, and copy that value directly.
+
+If the value already starts with `"web-"`, use it as-is.
 
 `stateFile` is a JSON file where the client persists seen notification IDs across restarts, so old notifications are not re-delivered. Omit to skip file persistence.
 
