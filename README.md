@@ -1,13 +1,48 @@
 # sns-fans
 
+[![npm](https://img.shields.io/npm/v/sns-fans)](https://www.npmjs.com/package/sns-fans)
+[![npm](https://img.shields.io/npm/dm/sns-fans)](https://www.npmjs.com/package/sns-fans)
+[![npm](https://img.shields.io/npm/l/sns-fans)](https://github.com/yngpiu/sns-fans/blob/master/LICENSE)
+[![CI](https://github.com/yngpiu/sns-fans/actions/workflows/ci.yml/badge.svg)](https://github.com/yngpiu/sns-fans/actions/workflows/ci.yml)
+
+Unofficial Node.js client for the app.fans GraphQL API.
+Monitor artist notifications, fetch posts, and get notified in real-time via polling.
+
+---
+
+# Table of Contents
+
+- [Install](#install)
+- [Quick Start](#quick-start)
+- [Concepts](#concepts)
+  - [FansClient](#fansclient)
+  - [WatcherHandle](#watcherhandle)
+- [API](#api)
+  - [Constructor](#constructor)
+  - [watch()](#watchconfig--create-a-watcher-auto-polling)
+  - [getNotifications()](#getnotificationsfilter--manual-fetch)
+  - [getPostDetail()](#getpostdetailslug--fetch-post-content)
+  - [GROUPS](#groups)
+  - [NOTIFICATION_CATEGORIES](#notification_categories)
+- [Errors](#errors)
+- [License](#license)
+
+---
+
+# Install
+
 ```sh
 npm install sns-fans
 ```
 
-## Quick start
+Requires Node.js >= 18.
 
-```ts
-import { FansClient } from "sns-fans"
+---
+
+# Quick Start
+
+```typescript
+import { FansClient, NOTIFICATION_CATEGORIES } from "sns-fans"
 
 const client = new FansClient({
   token: "eyJ...",
@@ -15,88 +50,116 @@ const client = new FansClient({
   guid: "xxx...",
 })
 
-const w = client.watch({ groupCodes: ["nmixx", "twice"] })
-w.onNotification((n) => console.log(`[${n.group?.name}] ${n.message}`))
-```
-
-## `FansClient`
-
-Main class. Import from `sns-fans`.
-
-### `constructor(config)`
-
-```ts
-const client = new FansClient({
-  token: "eyJ...",           // required — j-access-token from localStorage
-  clientUuid: "web-xxx...",  // required — j-client-uuid from localStorage, prepend "web-"
-  guid: "xxx...",            // required — GUID from localStorage
-  stateFile: "./state.json", // optional, defaults to ./fans_state.json
-})
-```
-
-3 required parameters from app.fans browser localStorage:
-
-1. Open `https://app.fans` in Chrome, press F12 → **Application** → **Local Storage** → `https://app.fans`
-2. Copy these keys:
-   - `j-access-token` → `token`
-   - `GUID` → `guid`
-   - Look for a key containing `j-client-uuid` (e.g. `mmkv.default\j-client-uuid`, `j-client-uuid`, or similar) → copy value → **prepend `"web-"`** → `clientUuid`
-
-If you can't find `j-client-uuid`, open the **Network** tab, find any `graphql` request, look for the `x-client-uuid` request header, and copy that value directly.
-
-If the value already starts with `"web-"`, use it as-is.
-
-`stateFile` is a JSON file where the client persists seen notification IDs across restarts, so old notifications are not re-delivered. Omit to skip file persistence.
-
-### `watch(config)` — Create a watcher (auto-polling)
-
-Primary function. Use when you want background polling for new notifications.
-
-```ts
+// Auto-polling for new notifications
 const w = client.watch({
-  groupCodes: ["nmixx", "twice"],  // which groups to monitor
-  categories: undefined,           // undefined = all categories
-  fetchPostDetail: true,           // whether to fetch post content
-  interval: 60,                    // polling interval in seconds
+  groupCodes: ["NMIXX", "TWICE"],
+  categories: [NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST],
 })
-```
 
-Filters:
-
-- **`groupCodes`** — Only receive notifications from these groups. Accepts a string (`"nmixx"`) or array (`["nmixx", "twice"]`). Default: all groups.
-- **`categories`** — Only receive notifications of these types. E.g. `[NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST]`. Default: all.
-- **`fetchPostDetail`** — If `true`, for `POST_CREATED_BY_ARTIST` notifications the client automatically calls `getPostDetail()` and attaches the result to `Notification.postDetail`. If `false`, `postDetail` is `null`.
-- **`interval`** — Seconds between API checks. Default: 60.
-
-Calling `watch()` starts polling automatically. Calling `w.remove()` stops polling if no other watchers remain.
-
-`watch()` returns a **`WatcherHandle`** with 3 methods:
-
-#### `w.onNotification(handler)` — Receive notifications
-
-```ts
 w.onNotification((notif) => {
-  console.log(notif.message)          // notification text
-  console.log(notif.category)         // "POST_CREATED_BY_ARTIST", ...
-  console.log(notif.group?.name)      // "NMIXX", "TWICE", ...
-  console.log(notif.createdAt)        // timestamp
-  console.log(notif.linkUrl)          // post URL path
+  console.log(`[${notif.group?.name}] ${notif.message}`)
   if (notif.postDetail) {
-    console.log(notif.postDetail.body) // post body text
-    console.log(notif.postDetail.attachments) // images/videos
+    console.log("Post body:", notif.postDetail.body)
   }
 })
 ```
 
-Handler fires for each new notification (not seen in previous checks). Newest first.
+Full examples can be found [here](examples/quickstart.ts).
 
-#### `w.onWebhook(url)` — Send webhook
+---
 
-```ts
+# Concepts
+
+## FansClient
+
+The root class. Holds authentication state for one user and provides all API methods.
+
+```typescript
+const client = new FansClient({ token, clientUuid, guid })
+```
+
+- `token` — JWT access token from localStorage key `j-access-token`
+- `clientUuid` — from localStorage (key `mmkv.default\j-client-uuid`), prepend `"web-"`
+- `guid` — from localStorage key `GUID`
+
+If you can't find `j-client-uuid` in localStorage, open the **Network** tab in DevTools, find any `graphql` request, and copy the `x-client-uuid` request header value.
+
+## WatcherHandle
+
+Returned by `client.watch()`. Controls a single watcher lifecycle.
+
+```typescript
+const w = client.watch({ groupCodes: "NMIXX" })
+
+w.onNotification((notif) => { /* handle new notification */ })
+w.onWebhook("https://example.com/hook")  // POST JSON on each notification
+w.remove()  // stop this watcher (polling stops if no watchers remain)
+```
+
+---
+
+# API
+
+## Constructor
+
+```typescript
+const client = new FansClient({
+  token: "eyJ...",           // required
+  clientUuid: "web-xxx...",  // required
+  guid: "xxx...",            // required
+  stateFile: "./state.json", // optional, defaults to ./fans_state.json
+})
+```
+
+`stateFile` persists seen notification IDs across restarts so old notifications are not re-delivered. Omit to skip file persistence.
+
+## watch(config) — Create a watcher (auto-polling)
+
+```typescript
+const w = client.watch({
+  groupCodes: ["nmixx", "twice"],  // groups to monitor
+  categories: undefined,           // undefined = all categories
+  fetchPostDetail: true,           // auto-fetch post content
+  interval: 60,                    // polling interval in seconds
+})
+```
+
+**Options:**
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `groupCodes` | `string \| string[]` | all groups | Group code or display name. Accepts `"nmixx"` or `"NMIXX"` |
+| `categories` | `NotificationCategory[]` | all | Filter by category, e.g. `[NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST]` |
+| `fetchPostDetail` | `boolean` | `false` | If `true`, auto-fetches post body for `POST_CREATED_BY_ARTIST` notifications |
+| `interval` | `number` | `60` | Seconds between API checks |
+
+**Returns:** [`WatcherHandle`](#watcherhandle)
+
+### w.onNotification(handler)
+
+```typescript
+w.onNotification((notif) => {
+  console.log(notif.message)          // "NMIXX posted a new post."
+  console.log(notif.category)         // "POST_CREATED_BY_ARTIST"
+  console.log(notif.group?.name)      // "NMIXX"
+  console.log(notif.createdAt)        // ISO-8601 timestamp
+  console.log(notif.linkUrl)          // "/post/abc-123"
+  if (notif.postDetail) {
+    console.log(notif.postDetail.body)         // full text
+    console.log(notif.postDetail.attachments)  // images/videos/audio
+  }
+})
+```
+
+### w.onWebhook(url)
+
+POSTs a JSON payload to the URL on each new notification.
+
+```typescript
 w.onWebhook("https://example.com/fans-notification")
 ```
 
-Each new notification triggers a POST JSON request to the URL. Sample payload:
+Payload:
 
 ```json
 {
@@ -110,81 +173,74 @@ Each new notification triggers a POST JSON request to the URL. Sample payload:
 }
 ```
 
-#### `w.remove()` — Remove watcher
+### w.remove()
 
-```ts
-w.remove()
-```
+Stops the watcher. Polling stops automatically if no watchers remain.
 
-Removes this watcher. Polling stops automatically if no watchers remain.
+## getNotifications(filter?) — Manual fetch
 
-### `getNotifications(filter?)` — Manual fetch
-
-Use when you don't need a watcher, just want to fetch notifications once.
-
-```ts
+```typescript
 const notifs = await client.getNotifications({
   groupCodes: ["nmixx"],
   categories: [NOTIFICATION_CATEGORIES.POST_CREATED_BY_ARTIST],
 })
-// notifs is Notification[], newest first
 ```
 
-Same filter shape as `watch()`.
+Returns `Notification[]`, newest first. Same filter shape as `watch()`.
 
-### `getPostDetail(slug)` — Fetch post content
+## getPostDetail(slug) — Fetch post content
 
-Use when you have a `Notification.linkUrl` (e.g. `/post/abc-123`) and want full content.
-
-```ts
-const slug = notif.linkUrl?.split("/").pop() // "abc-123"
+```typescript
+const slug = notif.linkUrl?.split("/").pop()
 const post = await client.getPostDetail(slug)
 if (post) {
   console.log(post.body)                    // text
-  console.log(post.bodyBlocks)              // text blocks + stickers
-  console.log(post.attachments)             // images/videos
+  console.log(post.bodyBlocks)              // TEXT + STICKER blocks
+  console.log(post.attachments)             // Image | Video | Audio
 }
 ```
 
 Each attachment has `key` and `url`. If `url` is null, use `https://img.app.fans/{key}`.
 
-## `GROUPS`
+## GROUPS
 
-Use to discover available group codes.
-
-```ts
+```typescript
 import { GROUPS } from "sns-fans"
 GROUPS.nmixx  // { id: "14", name: "NMIXX" }
 GROUPS.twice  // { id: "9", name: "TWICE" }
 ```
 
-17 groups available: nmixx, twice, itzy, girlset, day6, twopm, straykids, jypark, jangwooyoung, niziu, xdinaryheroes, kickflip, nexz, parkyoonho, nichkhun, junk, dodree.
+17 groups: nmixx, twice, itzy, girlset, day6, twopm, straykids, jypark, jangwooyoung, niziu, xdinaryheroes, kickflip, nexz, parkyoonho, nichkhun, junk, dodree.
 
-## `NOTIFICATION_CATEGORIES`
+## NOTIFICATION_CATEGORIES
 
-Use to filter categories in `watch()` and `getNotifications()`.
-
-```ts
+```typescript
 import { NOTIFICATION_CATEGORIES } from "sns-fans"
 ```
 
-| Constant | Meaning |
+| Constant | Description |
 |---|---|
 | `POST_CREATED_BY_ARTIST` | Artist posted a new post |
-| `CLIP_ACTIVATED` | Clip activated |
-| `NOTICE_ACTIVATED` | Official notice |
+| `CLIP_ACTIVATED` | New clip available |
+| `NOTICE_ACTIVATED` | Official notice published |
 | `POST_LIKE_CREATED_BY_ARTIST` | Artist liked a post |
 | `COMMENT_CREATED_BY_ARTIST` | Artist commented |
 | `COMMENT_LIKE_CREATED_BY_ARTIST` | Artist liked a comment |
 
-## Errors
+---
 
-```ts
-import { FansAuthError, FansValidationError, FansError } from "sns-fans"
+# Errors
+
+```typescript
+import { FansError, FansAuthError, FansValidationError } from "sns-fans"
 ```
 
-- `FansAuthError` — Token expired or refresh failed. Obtain a new token from the browser.
-- `FansValidationError` — Invalid group code, empty slug, etc.
-- `FansError` — General errors (API error, network error, etc.)
+- **`FansAuthError`** — Token expired or refresh failed. Obtain a new token from browser localStorage.
+- **`FansValidationError`** — Invalid group code, empty slug, etc.
+- **`FansError`** — General errors (API error, network error, etc.)
 
-## License MIT
+---
+
+# License
+
+MIT
