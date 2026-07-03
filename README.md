@@ -157,9 +157,11 @@ w.onNotification((notif) => {
 ### w.onWebhook(url)
 
 POSTs a JSON payload to the URL on each new notification.
+Discord webhook URLs are detected automatically and receive a Discord-compatible payload.
 
 ```typescript
 w.onWebhook("https://example.com/fans-notification")
+w.onWebhook("https://discord.com/api/webhooks/123/abc")
 ```
 
 Payload:

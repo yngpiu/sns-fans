@@ -1,6 +1,7 @@
 import * as fs from "node:fs"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { FansClient } from "./client.js"
+import type { Notification } from "./types.js"
 
 const VALID_TOKEN = makeToken({ sub: "1", iat: 1704000000, exp: 9999999999 })
 
@@ -119,6 +120,134 @@ describe("watch()", () => {
   it("accepts a stable watcher id for persisted state", () => {
     const client = createClient()
     expect(() => client.watch({ id: "nmixx-posts", groupCodes: "NMIXX" })).not.toThrow()
+  })
+
+  it("can post to a Discord webhook URL", async () => {
+    stateId++
+    const stateFile = `fans_state_${stateId}.json`
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ watchers: { "nmixx-posts": { seenIds: ["1"] } } }),
+      "utf-8",
+    )
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: async () => ({}),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const client = new FansClient({
+      token: VALID_TOKEN,
+      clientUuid: "web-test",
+      guid: "guid-test",
+      stateFile,
+    })
+    const watcher = client.watch({ id: "nmixx-posts", groupCodes: "NMIXX", interval: 1000 })
+    watcher.onWebhook("https://discord.com/api/webhooks/123/abc")
+
+    vi.spyOn(client, "getNotifications").mockResolvedValue([
+      {
+        id: "1",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "2026-07-03T12:00:00Z",
+        updatedAt: "2026-07-03T12:00:00Z",
+        message: "NMIXX posted a new post.",
+        linkUrl: "/post/abc-123",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+        postDetail: {
+          id: "p1",
+          slug: "abc-123",
+          body: "Hello from Discord.",
+          likeCount: 0,
+          commentCount: 0,
+        },
+      } as Notification,
+      {
+        id: "2",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "2026-07-03T12:01:00Z",
+        updatedAt: "2026-07-03T12:01:00Z",
+        message: "NMIXX posted a new post.",
+        linkUrl: "/post/abc-124",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+      } as Notification,
+    ])
+
+    await priv(client).check()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("https://discord.com/api/webhooks/123/abc")
+    const body = JSON.parse(init.body)
+    expect(body.content).toContain("NMIXX")
+    expect(body.embeds).toHaveLength(1)
+    expect(body.embeds[0].fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "Category", value: "POST_CREATED_BY_ARTIST" }),
+        expect.objectContaining({ name: "Group", value: "NMIXX" }),
+      ]),
+    )
+  })
+
+  it("keeps generic webhook payloads unchanged", async () => {
+    stateId++
+    const stateFile = `fans_state_${stateId}.json`
+    fs.writeFileSync(
+      stateFile,
+      JSON.stringify({ watchers: { "nmixx-generic": { seenIds: ["1"] } } }),
+      "utf-8",
+    )
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      json: async () => ({}),
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    const client = new FansClient({
+      token: VALID_TOKEN,
+      clientUuid: "web-test",
+      guid: "guid-test",
+      stateFile,
+    })
+    const watcher = client.watch({ id: "nmixx-generic", groupCodes: "NMIXX", interval: 1000 })
+    watcher.onWebhook("https://example.com/hook")
+
+    vi.spyOn(client, "getNotifications").mockResolvedValue([
+      {
+        id: "1",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "2026-07-03T12:00:00Z",
+        updatedAt: "2026-07-03T12:00:00Z",
+        message: "NMIXX posted a new post.",
+        linkUrl: "/post/abc-123",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+      } as Notification,
+      {
+        id: "2",
+        category: "POST_CREATED_BY_ARTIST",
+        classification: "COMMUNITY",
+        createdAt: "2026-07-03T12:01:00Z",
+        updatedAt: "2026-07-03T12:01:00Z",
+        message: "NMIXX posted a new post.",
+        linkUrl: "/post/abc-124",
+        group: { id: "14", name: "NMIXX", code: "nmixx" },
+      } as Notification,
+    ])
+
+    await priv(client).check()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [, init] = fetchMock.mock.calls[0]
+    const body = JSON.parse(init.body)
+    expect(body.event).toBe("notification")
+    expect(body.message).toBe("NMIXX posted a new post.")
   })
 })
 

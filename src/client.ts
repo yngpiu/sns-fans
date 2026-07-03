@@ -55,6 +55,21 @@ interface PersistedState {
   watchers: Record<string, { seenIds: string[] }>
 }
 
+interface DiscordEmbedField {
+  name: string
+  value: string
+  inline?: boolean
+}
+
+interface DiscordEmbed {
+  title?: string
+  description?: string
+  url?: string
+  timestamp?: string
+  color?: number
+  fields?: DiscordEmbedField[]
+}
+
 /**
  * Handle returned by {@link FansClient.watch}.
  * Use it to attach handlers, register a webhook, or stop watching.
@@ -187,6 +202,83 @@ export class FansClient {
     groupCodes?: GroupIdentifier | GroupIdentifier[],
   ): GroupIdentifier[] {
     return Array.isArray(groupCodes) ? groupCodes : groupCodes ? [groupCodes] : []
+  }
+
+  private isDiscordWebhookUrl(url: string): boolean {
+    try {
+      const parsed = new URL(url)
+      return (
+        (parsed.hostname === "discord.com" || parsed.hostname === "discordapp.com") &&
+        parsed.pathname.startsWith("/api/webhooks/")
+      )
+    } catch {
+      return false
+    }
+  }
+
+  private truncate(text: string, maxLength: number): string {
+    if (text.length <= maxLength) return text
+    return `${text.slice(0, maxLength - 3)}...`
+  }
+
+  private buildDiscordWebhookPayload(notif: Notification): Record<string, unknown> {
+    const groupName = notif.group?.name ?? "Unknown group"
+    const title = notif.message ?? notif.category
+    const postUrl = notif.linkUrl ? `https://app.fans${notif.linkUrl}` : undefined
+    const description = notif.postDetail?.body
+      ? this.truncate(notif.postDetail.body, 4000)
+      : undefined
+    const fields: DiscordEmbedField[] = [
+      { name: "Category", value: notif.category, inline: true },
+      { name: "Group", value: groupName, inline: true },
+      { name: "Created At", value: notif.createdAt, inline: false },
+    ]
+
+    if (notif.linkUrl) {
+      fields.push({
+        name: "Link",
+        value: postUrl ?? notif.linkUrl,
+        inline: false,
+      })
+    }
+
+    const embed: DiscordEmbed = {
+      title: this.truncate(title, 256),
+      url: postUrl,
+      timestamp: notif.createdAt,
+      color: 0x5865f2,
+      fields,
+    }
+
+    if (description) {
+      embed.description = description
+    }
+
+    const payload: Record<string, unknown> = {
+      content: this.truncate(`[${groupName}] ${title}`, 2000),
+      embeds: [embed],
+    }
+
+    return payload
+  }
+
+  private buildGenericWebhookPayload(notif: Notification): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
+      event: "notification",
+      id: notif.id,
+      category: notif.category,
+      classification: notif.classification,
+      message: notif.message,
+      linkUrl: notif.linkUrl ? `https://app.fans/${notif.linkUrl}` : null,
+      group: notif.group?.name ?? null,
+      createdAt: notif.createdAt,
+    }
+
+    if (notif.postDetail) {
+      payload.postDetail = notif.postDetail
+    }
+
+    return payload
   }
 
   // ----- Notifications -----
@@ -382,19 +474,9 @@ export class FansClient {
       onWebhook: (url: string) => {
         this.watchers.get(name)?.handlers.add(async (notif: Notification) => {
           try {
-            const payload: Record<string, unknown> = {
-              event: "notification",
-              id: notif.id,
-              category: notif.category,
-              classification: notif.classification,
-              message: notif.message,
-              linkUrl: notif.linkUrl ? `https://app.fans/${notif.linkUrl}` : null,
-              group: notif.group?.name ?? null,
-              createdAt: notif.createdAt,
-            }
-            if (notif.postDetail) {
-              payload.postDetail = notif.postDetail
-            }
+            const payload = this.isDiscordWebhookUrl(url)
+              ? this.buildDiscordWebhookPayload(notif)
+              : this.buildGenericWebhookPayload(notif)
             await fetch(url, {
               method: "POST",
               headers: { "content-type": "application/json" },
