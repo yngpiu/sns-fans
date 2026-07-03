@@ -136,15 +136,17 @@ export class FansClient {
         body: JSON.stringify(body),
       })
       if (!retryRes.ok) {
+        const body = await retryRes.text().catch(() => "(unreadable)")
         throw new FansAuthError(
-          `GraphQL request failed after token refresh (HTTP ${retryRes.status})`,
+          `GraphQL request failed after token refresh (HTTP ${retryRes.status}): ${body}`,
         )
       }
       return retryRes.json()
     }
 
     if (!res.ok) {
-      throw new FansError(`GraphQL request failed (HTTP ${res.status})`)
+      const body = await res.text().catch(() => "(unreadable)")
+      throw new FansError(`GraphQL request failed (HTTP ${res.status}): ${body}`)
     }
 
     return res.json()
@@ -214,7 +216,11 @@ export class FansClient {
       classification
       group { id name code }
       globalShop { id name }
-      targetMedia { key thumbnailUrl: thumbnailUrl(mode: THUMBNAIL, width: 300) }
+      targetMedia {
+        key
+        ... on Image { thumbnailUrl: thumbnailUrl(mode: THUMBNAIL, width: 300) }
+        ... on Video { thumbnailUrl: thumbnailUrl(mode: THUMBNAIL, width: 300) }
+      }
       actor { id }
     }
   }
