@@ -224,7 +224,7 @@ export class FansClient {
   private buildDiscordWebhookPayload(notif: Notification): Record<string, unknown> {
     const groupName = notif.group?.name ?? "Unknown group"
     const title = notif.message ?? notif.category
-    const cleanLinkUrl = notif.linkUrl?.replace(/^\//, '')
+    const cleanLinkUrl = notif.linkUrl?.replace(/^\//, "")
     const postUrl = cleanLinkUrl ? `https://app.fans/${cleanLinkUrl}` : undefined
     const description = notif.postDetail?.body
       ? this.truncate(notif.postDetail.body, 4000)
@@ -270,7 +270,7 @@ export class FansClient {
       category: notif.category,
       classification: notif.classification,
       message: notif.message,
-      linkUrl: notif.linkUrl ? `https://app.fans/${notif.linkUrl.replace(/^\//, '')}` : null,
+      linkUrl: notif.linkUrl ? `https://app.fans/${notif.linkUrl.replace(/^\//, "")}` : null,
       group: notif.group?.name ?? null,
       createdAt: notif.createdAt,
     }
